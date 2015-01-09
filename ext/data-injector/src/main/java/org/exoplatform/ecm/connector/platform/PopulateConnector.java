@@ -121,9 +121,10 @@ public class PopulateConnector implements ResourceContainer {
    * @param isPublishDoc indicates if the newly created documents are published.
    * @param isGenerateNewData indicates if data is generated new, not copy
    * @param size size of newly generated data
+   * @param template the option to generate documents by initial file.
    * @return
    */
-  private Response initializeLoadData(boolean isPublishDoc, boolean isGenerateNewData, int size) {
+  private Response initializeLoadData(boolean isPublishDoc, boolean isGenerateNewData, int size, String... template ) {
     SessionProvider sessionProvider = null;
     try {
       sessionProvider = WCMCoreUtils.getUserSessionProvider();
@@ -158,11 +159,32 @@ public class PopulateConnector implements ResourceContainer {
         }
       }
       //generate source file
+
+      /*BEGIN UPDATE*/
+      //initializeLoadData(true, true, (size == null ? 0 : size));
+      boolean isCustomizeTemplate = false;
+      String cpTemplate = template + "";
+      cpTemplate = cpTemplate.trim();      
+      /*END UPDATE*/
+      
       for (String importedFile : generatedFiles) {
         String importedFileName = importedFile.split(" ")[0];
         String mimeType = importedFile.split(" ")[1];
+        
+        /*BEGIN UPDATE*/
+        if(importedFileName.equals(cpTemplate))
+        		isCustomizeTemplate = true;
+        /*END UPDATE*/
+        
         if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {
-          String fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType);
+        	/*BEGIN UPDATE*/
+        	String fileNodeName = null;
+        	if(isCustomizeTemplate) {
+        		fileNodeName = generateFile2(importedFolderNode, importedFileName, size, mimeType);
+        	} else {
+        		fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType);
+        	}
+        	/*END UPDATE*/
           if (isPublishDoc) {
             publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
           }
@@ -292,6 +314,7 @@ public class PopulateConnector implements ResourceContainer {
    * @param to the bottom range of document name
    * @param folderPath the location where all documents will be created
    * @param categories the categories which created documents are attached.
+   * @param template the option to generate documents by initial file.
    * @return
    */
   @GET
@@ -301,7 +324,8 @@ public class PopulateConnector implements ResourceContainer {
                           @QueryParam("workspace") String workspace,
                           @QueryParam("folderPath") String folderPath,
                           @QueryParam("categories") String categories,
-                          @QueryParam("size") Integer size) {
+                          @QueryParam("size") Integer size,
+                          @QueryParam("template") String template) {
 
     SessionProvider sessionProvider = null;
     try {
@@ -312,8 +336,11 @@ public class PopulateConnector implements ResourceContainer {
       sessionProvider = WCMCoreUtils.getUserSessionProvider();
       Session sourceSession = sessionProvider.getSession(WORKSPACE_NAME, repoService_.getCurrentRepository());
       Session session = sessionProvider.getSession(workspace, repoService_.getCurrentRepository());
-
-      initializeLoadData(true, true, (size == null ? 0 : size));
+      
+      /*BEGIN UPDATE*/     
+      initializeLoadData(true, true, (size == null ? 0 : size),template);           
+      /*END UPDATE*/
+      
       //1.get source node
       Node sourceNode = getSourceNode(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType);
       Node targetFolder = dataDistributionManager_.getDataDistributionType(DataDistributionMode.NONE).getOrCreateDataNode(
@@ -371,7 +398,35 @@ public class PopulateConnector implements ResourceContainer {
     return Response.ok().header(LAST_MODIFIED_PROPERTY, dateFormat.format(new Date())).build();
   }
 
+  /*BEGIN UPDATE*/
   /**
+   * 
+   * @param parentNode
+   * @param fileName
+   * @param size
+   * @return
+   */
+  private String generateFile2(Node parentNode, String fileName, int size, String mimeType) throws Exception {    
+	String inFileName=SOURCE_DATA_FOLDER_PATH + "/" + fileName;
+	//PopulateConnector::generateFile::inFileName=/contents/content.doc
+	System.out.println("PopulateConnector::generateFile::inFileName=" + inFileName);
+	
+	InputStream input = PopulateConnector.class.getResourceAsStream(inFileName);
+	
+	// create temp file to store original data of nt:file node
+	File in = File.createTempFile("content_tmp", null);      // 
+	read(input, new BufferedOutputStream(new FileOutputStream(in)));	
+  
+    //import the newly created file into jcr
+    InputStream inputStream = new FileInputStream(in);
+    String fileNodeName = cmsService_.storeNode("nt:file", parentNode,
+                                                getInputProperties(fileName, inputStream, mimeType), true);
+
+    return fileNodeName;
+  }
+  /*END UPDATE*/
+
+/**
    * returns the document node in the folderPath corresponding to the given docType 
    * @param session session in which node will be retrieved
    * @param folderPath location of the nodes to search
