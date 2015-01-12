@@ -163,8 +163,10 @@ public class PopulateConnector implements ResourceContainer {
       /*BEGIN UPDATE*/
       //initializeLoadData(true, true, (size == null ? 0 : size));
       boolean isCustomizeTemplate = false;
-      String cpTemplate = template + "";
-      cpTemplate = cpTemplate.trim();      
+      String cpTemplate = null;
+      if(template != null) {
+    	  cpTemplate = (template[0] + "").trim();
+      }      
       /*END UPDATE*/
       
       for (String importedFile : generatedFiles) {
@@ -183,7 +185,8 @@ public class PopulateConnector implements ResourceContainer {
         		fileNodeName = generateFile2(importedFolderNode, importedFileName, size, mimeType);
         	} else {
         		fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType);
-        	}
+        	}        	
+        	isCustomizeTemplate = false;
         	/*END UPDATE*/
           if (isPublishDoc) {
             publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
