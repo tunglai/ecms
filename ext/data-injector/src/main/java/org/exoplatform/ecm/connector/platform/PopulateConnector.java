@@ -23,6 +23,7 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -66,7 +67,12 @@ import org.exoplatform.services.wcm.utils.WCMCoreUtils;
  * Created by The eXo Platform SAS
  * Author : Nguyen Anh Vu
  *          vuna@exoplatform.com
- * Jun 20, 2012  
+ *          Lai Thanh Tung tunglt@exoplatform.com
+ *          NguyenVan Nghi nghi_nguyenvan@exoplatform.com
+ * @since Jun 20, 2012
+ * @since Jan 09, 2015
+ *  
+ * 
  */
 @Path("/contents/populate/")
 public class PopulateConnector implements ResourceContainer {
@@ -141,58 +147,100 @@ public class PopulateConnector implements ResourceContainer {
       session.save();
       List<String> generatedFiles = new ArrayList<String>(Arrays.asList(SOURCE_FILES1));
       List<String> initializedFiles = new ArrayList<String>(Arrays.asList(SOURCE_FILES2));
+      
+      /*BEGIN UPDATE*/
+      //initializeLoadData(true, true, (size == null ? 0 : size));      
+      String cpTemplate = new String("");
+      boolean isExistedTemplate = false;      
+      
+      String strNewTemplate = "";
+      if(template != null && template[0] != null) {
+    	  cpTemplate = template[0].trim();
+      }
+      
+      if(!"".equals(cpTemplate)) {
+    	  // check template has in resources/contents folder
+    	  for (String importedFile : generatedFiles) {
+              String importedFileName = importedFile.split(" ")[0];
+              if(importedFileName.equals(cpTemplate)){
+            	  isExistedTemplate = true;
+            	  break;
+              }          
+          }
+    	  //when input template has extenstion and not in resources/contents folder
+    	  
+          if (!isExistedTemplate){        	  
+        	  int iTemplate = checkExternalTemplateExist(cpTemplate);
+        	  if(iTemplate == 1) isExistedTemplate = true;
+    		  strNewTemplate = cpTemplate + " " + processFileExtension(cpTemplate);    		 
+    		  if(isOffice(cpTemplate)) 
+    			  generatedFiles.add(strNewTemplate);
+    		  else 
+    			  initializedFiles.add(strNewTemplate);
+          }          
+      }
+      
       if (!isGenerateNewData) {
         generatedFiles.clear();
         initializedFiles.addAll(Arrays.asList(SOURCE_FILES1));
+        if(!"".equals(strNewTemplate))
+        	initializedFiles.add(strNewTemplate);
       }
+      /*END UPDATE*/      
+     
       //import source files into JCR
       for (String importedFile : initializedFiles) {
         String importedFileName = importedFile.split(" ")[0];
         String mimeType = importedFile.split(" ")[1];
         if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {
-          InputStream inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
-          String fileNodeName = cmsService_.storeNode("nt:file", importedFolderNode,
-                                                      getInputProperties(importedFileName, inputStream, mimeType), true);
-          if (isPublishDoc) {
-            publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
-          }
-        }
-      }
-      //generate source file
-
-      /*BEGIN UPDATE*/
-      //initializeLoadData(true, true, (size == null ? 0 : size));
-      boolean isCustomizeTemplate = false;
-      String cpTemplate = null;
-      if(template != null) {
-    	  cpTemplate = (template[0] + "").trim();
-      }      
-      /*END UPDATE*/
-      
-      for (String importedFile : generatedFiles) {
-        String importedFileName = importedFile.split(" ")[0];
-        String mimeType = importedFile.split(" ")[1];
-        
-        /*BEGIN UPDATE*/
-        if(importedFileName.equals(cpTemplate))
-        		isCustomizeTemplate = true;
-        /*END UPDATE*/
-        
-        if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {
-        	/*BEGIN UPDATE*/
-        	String fileNodeName = null;
-        	if(isCustomizeTemplate) {
-        		fileNodeName = generateFile2(importedFolderNode, importedFileName, size, mimeType);
+        	InputStream inputStream = null;
+        	if(!"".equals(cpTemplate)) {
+            	//find out template file
+            	if(importedFileName.equals(cpTemplate)) {
+            		//input templete is in resources/contents folder
+        	    	if(!isExistedTemplate) { // input templete is in external
+        	    		 String sTomcatHome = System.getProperty("catalina.home");
+        	    	     String sCheckTemplatePublic = sTomcatHome + File.separator + importedFileName;     
+        	    		 File fTemplate2 = new File(sCheckTemplatePublic);
+        	    		 // create temp file to store original data of nt:file node
+        	    		 File in = File.createTempFile("content_tmp", null); 
+        	    		 InputStream input = new FileInputStream(fTemplate2);
+        	    		 read(input, new BufferedOutputStream(new FileOutputStream(in)));	
+        	    		  
+        	    		    //import the newly created file into jcr
+        	    		 inputStream = new FileInputStream(in);
+        	    		 
+        	    	} else {
+        	    		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
+        	    	}
+        	    	mimeType = processFileExtension(importedFileName);
+            	}
         	} else {
-        		fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType);
-        	}        	
-        	isCustomizeTemplate = false;
-        	/*END UPDATE*/
-          if (isPublishDoc) {
-            publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
-          }
+        		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
+        	}
+        	
+	        if(inputStream != null) {
+		         String fileNodeName = cmsService_.storeNode("nt:file", importedFolderNode,
+		                                                      getInputProperties(importedFileName, inputStream, mimeType), true);
+		         if (isPublishDoc) {
+		            publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
+		         }
+	        }
         }
       }
+      //generate source file      
+      for (String importedFile : generatedFiles) {
+          String importedFileName = importedFile.split(" ")[0];
+          String mimeType = importedFile.split(" ")[1];         
+          
+          if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {      	
+          	String fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType, cpTemplate, isExistedTemplate);
+          	
+            if (isPublishDoc) {
+              publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
+            }
+          }
+        }
     } catch (Exception e) {
       if (LOG.isErrorEnabled()) {
         LOG.error(e);
@@ -211,7 +259,7 @@ public class PopulateConnector implements ResourceContainer {
    * @param size
    * @return
    */
-  private String generateFile(Node parentNode, String fileName, int size, String mimeType) throws Exception {
+  private String generateFile(Node parentNode, String fileName, int size, String mimeType, String inTemplate, boolean pIsExistedTemplate) throws Exception {
     String fileExtension = fileName.substring(fileName.indexOf('.') + 1);
     //build the set of word to generate document
     BufferedReader br = null;
@@ -240,47 +288,80 @@ public class PopulateConnector implements ResourceContainer {
     }
     content.append('.');
     File tempFile = null;
-    if(fileExtension.equalsIgnoreCase("doc")) {
-      //create a temporary txt file containing generated content at previous step
-      tempFile = File.createTempFile("content_temp", fileExtension);
-      InputStream input = new BufferedInputStream(new ByteArrayInputStream(content.toString().getBytes()));
-      OutputStream out = new BufferedOutputStream((new FileOutputStream(tempFile)));
-      // create temp file to store original data of nt:file node
-      File in = File.createTempFile("content_tmp", null);
-      read(input, new BufferedOutputStream(new FileOutputStream(in)));
-      try {
-        boolean success = jodConverter_.convert(in, tempFile, fileExtension);
-        // If the converting was failure then delete the content temporary file
-        if (!success) {
-          tempFile.delete();
-        }
-      } catch (OfficeException connection) {
-        tempFile.delete();
-        if (LOG.isErrorEnabled()) {
-          LOG.error("Exception when using Office Service");
-        }
-      } finally {
-        in.delete();
-        out.flush();
-        out.close();
-      }
-    } else {
-      try {
-        DocumentRenderer documentRender = new DocumentRenderer();
-        boolean success = documentRender.createDocument(content.toString(), fileName, fileExtension);
-        if(success) tempFile = new File(fileName); 
-      } catch(Exception ex) {
-        if (LOG.isErrorEnabled()) {
-          LOG.error("Exception when creating document");
-        }
-      }
+    if("".equals(inTemplate)) {
+	    if(fileExtension.equalsIgnoreCase("doc")) {
+	      //create a temporary txt file containing generated content at previous step
+	      tempFile = File.createTempFile("content_temp", fileExtension);
+	      InputStream input = new BufferedInputStream(new ByteArrayInputStream(content.toString().getBytes()));
+	      OutputStream out = new BufferedOutputStream((new FileOutputStream(tempFile)));
+	      // create temp file to store original data of nt:file node
+	      File in = File.createTempFile("content_tmp", null);
+	      read(input, new BufferedOutputStream(new FileOutputStream(in)));
+	      try {
+	        boolean success = jodConverter_.convert(in, tempFile, fileExtension);
+	        // If the converting was failure then delete the content temporary file
+	        if (!success) {
+	          tempFile.delete();
+	        }
+	      } catch (OfficeException connection) {
+	        tempFile.delete();
+	        if (LOG.isErrorEnabled()) {
+	          LOG.error("Exception when using Office Service");
+	        }
+	      } finally {
+	        in.delete();
+	        out.flush();
+	        out.close();
+	      }
+	    } else 
+	    {	    	
+		      try {
+		        DocumentRenderer documentRender = new DocumentRenderer();
+		        boolean success = documentRender.createDocument(content.toString(), fileName, fileExtension);
+		        if(success) tempFile = new File(fileName); 
+		       } catch(Exception ex) {
+		        if (LOG.isErrorEnabled()) {
+		          LOG.error("Exception when creating document");
+		        }
+	      	   }	       
+	    }
     }
     //import the newly created file into jcr
-    InputStream inputStream = new FileInputStream(tempFile);
+    //InputStream inputStream = new FileInputStream(tempFile);
+    InputStream inputStream = null;
+    String sMimeType = mimeType;
+    
+    // template is not empty
+    if(!"".equals(inTemplate)) {
+    	//find out template file
+    	if(fileName.equals(inTemplate)) {
+    		//input templete is in resources/contents folder
+	    	if(pIsExistedTemplate) {
+	    		 inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + fileName);
+	    	
+	    	} else { // input templete is in external
+	    		 String sTomcatHome = System.getProperty("catalina.home");
+	    	     String sCheckTemplatePublic = sTomcatHome + File.separator + fileName;     
+	    		 File fTemplate2 = new File(sCheckTemplatePublic);
+	    		 // create temp file to store original data of nt:file node
+	    		 File in = File.createTempFile("content_tmp", null); 
+	    		 InputStream input = new FileInputStream(fTemplate2);
+	    		 read(input, new BufferedOutputStream(new FileOutputStream(in)));	
+	    		  
+	    		    //import the newly created file into jcr
+	    		 inputStream = new FileInputStream(in);
+	    		 
+	    	}
+	    	sMimeType = processFileExtension(fileName);
+    	}
+    } else {
+    	inputStream = new FileInputStream(tempFile);
+    }
+    
     String fileNodeName = cmsService_.storeNode("nt:file", parentNode,
-                                                getInputProperties(fileName, inputStream, mimeType), true);
+                                                getInputProperties(fileName, inputStream, sMimeType), true);
 
-
+    LOG.info("\ngenerateFile::fileName=" + fileName);
     return fileNodeName;
   }
 
@@ -345,7 +426,11 @@ public class PopulateConnector implements ResourceContainer {
       /*END UPDATE*/
       
       //1.get source node
-      Node sourceNode = getSourceNode(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType);
+      Node sourceNode = null;
+      if(template == null || "".equals(template))
+    	  sourceNode = getSourceNode(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType);
+      else 
+    	  sourceNode = getSourceNode2(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType, "" + template);
       Node targetFolder = dataDistributionManager_.getDataDistributionType(DataDistributionMode.NONE).getOrCreateDataNode(
                                                                                                                           session.getRootNode(), folderPath);
       //2.store nodes
@@ -399,35 +484,80 @@ public class PopulateConnector implements ResourceContainer {
 
     DateFormat dateFormat = new SimpleDateFormat(IF_MODIFIED_SINCE_DATE_FORMAT);
     return Response.ok().header(LAST_MODIFIED_PROPERTY, dateFormat.format(new Date())).build();
-  }
-
-  /*BEGIN UPDATE*/
-  /**
-   * 
-   * @param parentNode
-   * @param fileName
-   * @param size
-   * @return
-   */
-  private String generateFile2(Node parentNode, String fileName, int size, String mimeType) throws Exception {    
-	String inFileName=SOURCE_DATA_FOLDER_PATH + "/" + fileName;
-	//PopulateConnector::generateFile::inFileName=/contents/content.doc
-	System.out.println("PopulateConnector::generateFile::inFileName=" + inFileName);
-	
-	InputStream input = PopulateConnector.class.getResourceAsStream(inFileName);
-	
-	// create temp file to store original data of nt:file node
-	File in = File.createTempFile("content_tmp", null);      // 
-	read(input, new BufferedOutputStream(new FileOutputStream(in)));	
+  }  
   
-    //import the newly created file into jcr
-    InputStream inputStream = new FileInputStream(in);
-    String fileNodeName = cmsService_.storeNode("nt:file", parentNode,
-                                                getInputProperties(fileName, inputStream, mimeType), true);
+  private void cp2Contents(String strNewTemplate) {
+		// TODO Auto-generated method stub
+		
+	}
+  
+  private boolean isOffice(String cpTemplate) {
+		boolean bOffice = cpTemplate.endsWith(".doc") | cpTemplate.endsWith(".docx") | cpTemplate.endsWith(".xls");
+		bOffice = bOffice | cpTemplate.endsWith(".ppt") | cpTemplate.endsWith(".pdf");
+		if(bOffice)
+			return true;
+		else
+			return false;
+	  }
 
-    return fileNodeName;
-  }
-  /*END UPDATE*/
+	private String processFileExtension(String cpTemplate) {	
+		String sMimeType = "";
+		if(cpTemplate.endsWith(".doc")) {
+			sMimeType = "application/msword";
+		} else if (cpTemplate.endsWith(".jpg")) {
+			sMimeType = "image/jpeg";
+		} else if (cpTemplate.endsWith(".jpeg")) {
+			sMimeType = "image/jpeg";
+		} else if (cpTemplate.endsWith(".gif")) {
+			sMimeType = "image/gif";
+		} else if (cpTemplate.endsWith(".png")) {
+			sMimeType = "image/png";
+		} else {
+			sMimeType = "application" + File.separator + cpTemplate.substring(cpTemplate.lastIndexOf(".") + 1);
+		}
+		
+		return sMimeType;
+	}
+
+	/**
+	 * @param fileName the file name to check, fileName has extenstion
+	 * @return 1=default template file 2=file in public template folder 3=file not existed
+	 */
+	private int checkExternalTemplateExist(final String fileName) {
+		  int iRet = 2;
+		  String sTomcatHome = System.getProperty("catalina.home");
+	      String sCheckPublicTemplate = sTomcatHome + File.separator + fileName;	  
+		  File fFile2Check = new File(sCheckPublicTemplate);
+		  InputStream inStream = null;
+		  
+		  try
+		  {
+			  inStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + fileName);
+			  if(inStream != null)
+				  iRet = 1;
+			  else 
+			  {
+				  if(fFile2Check.exists() && fFile2Check.isFile())
+					  iRet = 2;
+				  else 
+					  iRet = 3;
+				  LOG.info("checkExternalTemplateExist::fFileExternal2Check=" + fFile2Check.getAbsolutePath());
+			  }			 
+		  } finally {
+			  if(inStream != null) {
+				try {
+					inStream.close();
+				} catch (IOException e) {					
+					e.printStackTrace();
+				}
+			  }
+		  }	
+		  
+		  LOG.info("checkTemplateExist::fFile2Check=" + fFile2Check.getAbsolutePath());		
+
+		return iRet;
+		
+	}
 
 /**
    * returns the document node in the folderPath corresponding to the given docType 
@@ -449,6 +579,31 @@ public class PopulateConnector implements ResourceContainer {
         }
       }
     }
+    return null;
+  }
+  
+  /**
+   * returns the document node in the folderPath corresponding to the given docType 
+   * @param session session in which node will be retrieved
+   * @param folderPath location of the nodes to search
+   * @param docType type of document to get
+   * @return the Node
+   * @throws Exception
+   */
+  private Node getSourceNode2(Session session, String folderPath, String docType, String templateName) throws Exception {
+    Node folderNode = session.getRootNode().getNode(folderPath);
+    for (NodeIterator iter = folderNode.getNodes(); iter.hasNext();) {
+      Node childNode = iter.nextNode();
+      String nodeName = childNode.getName();
+      int index = nodeName.indexOf(".");
+      if (index > -1) {
+    	  if (templateName.isEmpty()) {
+    	     if (docType != null && docType.equals(nodeName.substring(index+1))) return childNode;
+    	  }
+    	  else if (docType != null && docType.equals(nodeName.substring(index+1)) && templateName.equals(nodeName)) return childNode;
+      }
+    }
+    
     return null;
   }
 
