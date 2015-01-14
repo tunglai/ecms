@@ -65,15 +65,13 @@ import org.exoplatform.services.wcm.utils.WCMCoreUtils;
 
 /**
  * Created by The eXo Platform SAS
- * Author : Nguyen Anh Vu
- *          vuna@exoplatform.com
+ * Author : Nguyen Anh Vu vuna@exoplatform.com
  *          Lai Thanh Tung tunglt@exoplatform.com
- *          NguyenVan Nghi nghi_nguyenvan@exoplatform.com
+ *          Nguyen Van Nghi nghi_nguyenvan@exoplatform.com
  * @since Jun 20, 2012
- * @since Jan 09, 2015
- *  
- * 
+ * @since Jan 09, 2015 
  */
+
 @Path("/contents/populate/")
 public class PopulateConnector implements ResourceContainer {
 
@@ -110,6 +108,8 @@ public class PopulateConnector implements ResourceContainer {
   private DataDistributionManager dataDistributionManager_;
   private TaxonomyService taxonomyService_;
   private JodConverterService jodConverter_;
+  
+  private static final String TOMCAT_HOME = System.getProperty("catalina.home");
 
   public PopulateConnector(RepositoryService repositoryService, CmsService cmsService, WCMPublicationService publicationService,
                            DataDistributionManager dataDistributionManager, TaxonomyService taxonomyService,
@@ -127,10 +127,11 @@ public class PopulateConnector implements ResourceContainer {
    * @param isPublishDoc indicates if the newly created documents are published.
    * @param isGenerateNewData indicates if data is generated new, not copy
    * @param size size of newly generated data
-   * @param template the option to generate documents by initial file.
+   * @param template the option to generate documents by external template arrTemplate[0] = Doc Template;
+      arrTemplate[1] = Template Path
    * @return
    */
-  private Response initializeLoadData(boolean isPublishDoc, boolean isGenerateNewData, int size, String... template ) {
+  private Response initializeLoadData(boolean isPublishDoc, boolean isGenerateNewData, int size, String pMimetype, String... template) {
     SessionProvider sessionProvider = null;
     try {
       sessionProvider = WCMCoreUtils.getUserSessionProvider();
@@ -148,15 +149,12 @@ public class PopulateConnector implements ResourceContainer {
       List<String> generatedFiles = new ArrayList<String>(Arrays.asList(SOURCE_FILES1));
       List<String> initializedFiles = new ArrayList<String>(Arrays.asList(SOURCE_FILES2));
       
-      /*BEGIN UPDATE*/
-      //initializeLoadData(true, true, (size == null ? 0 : size));      
-      String cpTemplate = new String("");
+      /*BEGIN UPDATE*/     
+      String cpTemplate = template[0];
+      String cpTemplatePath = template[1];
       boolean isExistedTemplate = false;      
-      
       String strNewTemplate = "";
-      if(template != null && template[0] != null) {
-    	  cpTemplate = template[0].trim();
-      }
+     
       
       if(!"".equals(cpTemplate)) {
     	  // check template has in resources/contents folder
@@ -167,12 +165,12 @@ public class PopulateConnector implements ResourceContainer {
             	  break;
               }          
           }
-    	  //when input template has extenstion and not in resources/contents folder
     	  
+    	  //when input template is not in default list, finds it in resources/contents folder    	  
           if (!isExistedTemplate){        	  
         	  int iTemplate = checkExternalTemplateExist(cpTemplate);
         	  if(iTemplate == 1) isExistedTemplate = true;
-    		  strNewTemplate = cpTemplate + " " + processFileExtension(cpTemplate);    		 
+    		  strNewTemplate = cpTemplate + " " + processFileExtension(cpTemplate,pMimetype);    		 
     		  if(isOffice(cpTemplate)) 
     			  generatedFiles.add(strNewTemplate);
     		  else 
@@ -188,7 +186,7 @@ public class PopulateConnector implements ResourceContainer {
       }
       /*END UPDATE*/      
      
-      //import source files into JCR
+      //import image source files into JCR
       for (String importedFile : initializedFiles) {
         String importedFileName = importedFile.split(" ")[0];
         String mimeType = importedFile.split(" ")[1];
@@ -196,11 +194,10 @@ public class PopulateConnector implements ResourceContainer {
         	InputStream inputStream = null;
         	if(!"".equals(cpTemplate)) {
             	//find out template file
-            	if(importedFileName.equals(cpTemplate)) {
-            		//input templete is in resources/contents folder
-        	    	if(!isExistedTemplate) { // input templete is in external
-        	    		 String sTomcatHome = System.getProperty("catalina.home");
-        	    	     String sCheckTemplatePublic = sTomcatHome + File.separator + importedFileName;     
+            	if(importedFileName.equals(cpTemplate)) {            		
+        	    	if(!isExistedTemplate) { // input templete is in external    	    		
+        	    		
+        	    	     String sCheckTemplatePublic = getTemplatePath(cpTemplatePath) + File.separator + importedFileName;     
         	    		 File fTemplate2 = new File(sCheckTemplatePublic);
         	    		 // create temp file to store original data of nt:file node
         	    		 File in = File.createTempFile("content_tmp", null); 
@@ -210,10 +207,9 @@ public class PopulateConnector implements ResourceContainer {
         	    		    //import the newly created file into jcr
         	    		 inputStream = new FileInputStream(in);
         	    		 
-        	    	} else {
+        	    	} else { // input templete is in contents folder
         	    		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
-        	    	}
-        	    	mimeType = processFileExtension(importedFileName);
+        	    	}        	    	
             	}
         	} else {
         		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
@@ -222,20 +218,28 @@ public class PopulateConnector implements ResourceContainer {
 	        if(inputStream != null) {
 		         String fileNodeName = cmsService_.storeNode("nt:file", importedFolderNode,
 		                                                      getInputProperties(importedFileName, inputStream, mimeType), true);
+		         LOG.info("\nImportedDocuments::Image importedFileName=" + importedFileName + ":mimetype=" + mimeType);
 		         if (isPublishDoc) {
 		            publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
+		         }
+		         if(inputStream != null) {
+		         	try {
+		         		inputStream.close();
+		         	} catch (Exception ei) {    		
+		         	}
 		         }
 	        }
         }
       }
-      //generate source file      
+      
+      //generate source office file into jcr    
       for (String importedFile : generatedFiles) {
           String importedFileName = importedFile.split(" ")[0];
           String mimeType = importedFile.split(" ")[1];         
           
           if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {      	
-          	String fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType, cpTemplate, isExistedTemplate);
-          	
+          	String fileNodeName = generateFile(importedFolderNode, importedFileName, size, mimeType, cpTemplate, isExistedTemplate,cpTemplatePath);
+          	LOG.info("\nImportedDocuments::Office importedFileName=" + importedFileName + ":mimetype=" + mimeType);
             if (isPublishDoc) {
               publicationService_.updateLifecyleOnChangeContent((Node)session.getItem(fileNodeName), "acme", "root","published");
             }
@@ -257,9 +261,13 @@ public class PopulateConnector implements ResourceContainer {
    * @param parentNode
    * @param fileName
    * @param size
-   * @return
+   * @param mimeType
+   * @param inTemplate
+   * @param inIsExistedTemplate
+   * @param inTemplatePath
+   * @return String
    */
-  private String generateFile(Node parentNode, String fileName, int size, String mimeType, String inTemplate, boolean pIsExistedTemplate) throws Exception {
+  private String generateFile(Node parentNode, String fileName, int size, String mimeType, String inTemplate, boolean inIsExistedTemplate, String inTemplatePath) throws Exception {
     String fileExtension = fileName.substring(fileName.indexOf('.') + 1);
     //build the set of word to generate document
     BufferedReader br = null;
@@ -326,42 +334,42 @@ public class PopulateConnector implements ResourceContainer {
 	      	   }	       
 	    }
     }
-    //import the newly created file into jcr
-    //InputStream inputStream = new FileInputStream(tempFile);
-    InputStream inputStream = null;
-    String sMimeType = mimeType;
     
+    //import the newly created file into jcr    
+    InputStream inputStream = null;    
     // template is not empty
     if(!"".equals(inTemplate)) {
     	//find out template file
     	if(fileName.equals(inTemplate)) {
     		//input templete is in resources/contents folder
-	    	if(pIsExistedTemplate) {
+	    	if(inIsExistedTemplate) {
 	    		 inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + fileName);
 	    	
-	    	} else { // input templete is in external
-	    		 String sTomcatHome = System.getProperty("catalina.home");
-	    	     String sCheckTemplatePublic = sTomcatHome + File.separator + fileName;     
+	    	} else { // input template is in external	    		
+	    	     String sCheckTemplatePublic = getTemplatePath(inTemplatePath)+ File.separator + fileName;     
 	    		 File fTemplate2 = new File(sCheckTemplatePublic);
 	    		 // create temp file to store original data of nt:file node
-	    		 File in = File.createTempFile("content_tmp", null); 
+	    		 File in = File.createTempFile("content_tmp", null);
 	    		 InputStream input = new FileInputStream(fTemplate2);
-	    		 read(input, new BufferedOutputStream(new FileOutputStream(in)));	
+	    		 read(input, new BufferedOutputStream(new FileOutputStream(in)));
 	    		  
-	    		    //import the newly created file into jcr
-	    		 inputStream = new FileInputStream(in);
-	    		 
-	    	}
-	    	sMimeType = processFileExtension(fileName);
+	    		 //import the newly created file into jcr
+	    		 inputStream = new FileInputStream(in);	    		 
+	    	}	    	
     	}
     } else {
     	inputStream = new FileInputStream(tempFile);
     }
     
     String fileNodeName = cmsService_.storeNode("nt:file", parentNode,
-                                                getInputProperties(fileName, inputStream, sMimeType), true);
-
-    LOG.info("\ngenerateFile::fileName=" + fileName);
+                                                getInputProperties(fileName, inputStream, mimeType), true);
+    if(inputStream != null) {
+    	try {
+    		inputStream.close();
+    	} catch (Exception ei) {    		
+    	}
+    }
+    
     return fileNodeName;
   }
 
@@ -387,7 +395,7 @@ public class PopulateConnector implements ResourceContainer {
   @GET
   @Path("/initialLoad")
   public Response initialLoad(@QueryParam("isPublishDoc") boolean isPublishDoc) {
-    return initializeLoadData(isPublishDoc, false, 0);
+    return initializeLoadData(isPublishDoc, false, 0,"");
   }
 
   /**
@@ -399,6 +407,7 @@ public class PopulateConnector implements ResourceContainer {
    * @param folderPath the location where all documents will be created
    * @param categories the categories which created documents are attached.
    * @param template the option to generate documents by initial file.
+   * @param mimetype the mime type of template file.
    * @return
    */
   @GET
@@ -409,7 +418,8 @@ public class PopulateConnector implements ResourceContainer {
                           @QueryParam("folderPath") String folderPath,
                           @QueryParam("categories") String categories,
                           @QueryParam("size") Integer size,
-                          @QueryParam("template") String template) {
+                          @QueryParam("template") String template,
+                          @QueryParam("mimetype") String mimetype) {
 
     SessionProvider sessionProvider = null;
     try {
@@ -421,16 +431,39 @@ public class PopulateConnector implements ResourceContainer {
       Session sourceSession = sessionProvider.getSession(WORKSPACE_NAME, repoService_.getCurrentRepository());
       Session session = sessionProvider.getSession(workspace, repoService_.getCurrentRepository());
       
-      /*BEGIN UPDATE*/     
-      initializeLoadData(true, true, (size == null ? 0 : size),template);           
+      /*BEGIN UPDATE*/
+      String sTemplatePath = null;
+      String sTemplate = null;
+      if(template != null) {
+    	  String tmpPlate = template.trim();
+    	  if(tmpPlate.indexOf("/") > -1) {
+	    	  sTemplate = tmpPlate.substring(tmpPlate.lastIndexOf("/") + 1);
+	    	  sTemplatePath = tmpPlate.substring(0, tmpPlate.lastIndexOf("/"));
+	    	  if(sTemplatePath == null || "".equals(sTemplatePath.trim())) sTemplatePath = new String("");
+	    	  if(sTemplate == null || "".equals(sTemplate.trim())) sTemplate = new String("");
+    	  } else
+    	  {
+    		  sTemplatePath = new String("");
+    		  sTemplate = tmpPlate;
+    	  }
+      } else {
+    	  sTemplatePath = new String("");
+    	  sTemplate = new String("");
+      }      
+     
+      String[] arrTemplate = new String[2];
+      arrTemplate[0] = sTemplate;
+      arrTemplate[1] = sTemplatePath;
+      
+      initializeLoadData(true, true, (size == null ? 0 : size),mimetype, arrTemplate);           
       /*END UPDATE*/
       
       //1.get source node
       Node sourceNode = null;
-      if(template == null || "".equals(template))
+      if(sTemplate == null || "".equals(sTemplate))
     	  sourceNode = getSourceNode(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType);
       else 
-    	  sourceNode = getSourceNode2(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType, "" + template);
+    	  sourceNode = getSourceNode2(sourceSession, IMPORTED_DOCUMENTS_FOLDER, docType, sTemplate);
       Node targetFolder = dataDistributionManager_.getDataDistributionType(DataDistributionMode.NONE).getOrCreateDataNode(
                                                                                                                           session.getRootNode(), folderPath);
       //2.store nodes
@@ -486,11 +519,6 @@ public class PopulateConnector implements ResourceContainer {
     return Response.ok().header(LAST_MODIFIED_PROPERTY, dateFormat.format(new Date())).build();
   }  
   
-  private void cp2Contents(String strNewTemplate) {
-		// TODO Auto-generated method stub
-		
-	}
-  
   private boolean isOffice(String cpTemplate) {
 		boolean bOffice = cpTemplate.endsWith(".doc") | cpTemplate.endsWith(".docx") | cpTemplate.endsWith(".xls");
 		bOffice = bOffice | cpTemplate.endsWith(".ppt") | cpTemplate.endsWith(".pdf");
@@ -498,25 +526,48 @@ public class PopulateConnector implements ResourceContainer {
 			return true;
 		else
 			return false;
-	  }
+	}
 
-	private String processFileExtension(String cpTemplate) {	
-		String sMimeType = "";
-		if(cpTemplate.endsWith(".doc")) {
-			sMimeType = "application/msword";
-		} else if (cpTemplate.endsWith(".jpg")) {
-			sMimeType = "image/jpeg";
-		} else if (cpTemplate.endsWith(".jpeg")) {
-			sMimeType = "image/jpeg";
-		} else if (cpTemplate.endsWith(".gif")) {
-			sMimeType = "image/gif";
-		} else if (cpTemplate.endsWith(".png")) {
-			sMimeType = "image/png";
-		} else {
-			sMimeType = "application" + File.separator + cpTemplate.substring(cpTemplate.lastIndexOf(".") + 1);
-		}
+	private String processFileExtension (String cpTemplate, String cpMimetype) {	
+		String sRetMimeType = new String("");		
+		if(cpMimetype == null || "".equals(cpMimetype.trim()))
+			;
+		else 
+			sRetMimeType = cpMimetype.trim();		
 		
-		return sMimeType;
+		if(sRetMimeType.isEmpty()) {
+			if(cpTemplate.endsWith(".doc")) {
+				sRetMimeType = "application/msword";
+			} else if (cpTemplate.endsWith(".jpg")) {
+				sRetMimeType = "image/jpeg";
+			} else if (cpTemplate.endsWith(".jpeg")) {
+				sRetMimeType = "image/jpeg";
+			} else if (cpTemplate.endsWith(".gif")) {
+				sRetMimeType = "image/gif";
+			} else if (cpTemplate.endsWith(".png")) {
+				sRetMimeType = "image/png";
+			} else {
+				sRetMimeType = "application" + File.separator + cpTemplate.substring(cpTemplate.lastIndexOf(".") + 1);
+			}
+		}		
+		
+		return sRetMimeType;
+	}
+	
+	private String getTemplatePath(String templatePath) {
+		String sPath = "";
+		if(TOMCAT_HOME.endsWith("/"))
+				sPath = TOMCAT_HOME.substring(0, TOMCAT_HOME.length() - 1);
+		else 
+			sPath = TOMCAT_HOME;
+		
+		 if(!templatePath.startsWith("/")) {
+			 sPath = sPath + "/" + templatePath;
+		 } else {
+			 sPath = sPath + templatePath;
+		 }
+		 
+		 return sPath;
 	}
 
 	/**
@@ -524,9 +575,8 @@ public class PopulateConnector implements ResourceContainer {
 	 * @return 1=default template file 2=file in public template folder 3=file not existed
 	 */
 	private int checkExternalTemplateExist(final String fileName) {
-		  int iRet = 2;
-		  String sTomcatHome = System.getProperty("catalina.home");
-	      String sCheckPublicTemplate = sTomcatHome + File.separator + fileName;	  
+		  int iRet = 2;		  
+	      String sCheckPublicTemplate = getTemplatePath("") + File.separator + fileName;	  
 		  File fFile2Check = new File(sCheckPublicTemplate);
 		  InputStream inStream = null;
 		  
@@ -540,8 +590,7 @@ public class PopulateConnector implements ResourceContainer {
 				  if(fFile2Check.exists() && fFile2Check.isFile())
 					  iRet = 2;
 				  else 
-					  iRet = 3;
-				  LOG.info("checkExternalTemplateExist::fFileExternal2Check=" + fFile2Check.getAbsolutePath());
+					  iRet = 3;				 
 			  }			 
 		  } finally {
 			  if(inStream != null) {
@@ -551,15 +600,12 @@ public class PopulateConnector implements ResourceContainer {
 					e.printStackTrace();
 				}
 			  }
-		  }	
-		  
-		  LOG.info("checkTemplateExist::fFile2Check=" + fFile2Check.getAbsolutePath());		
-
-		return iRet;
-		
+		  }
+	
+		return iRet;		
 	}
 
-/**
+   /**
    * returns the document node in the folderPath corresponding to the given docType 
    * @param session session in which node will be retrieved
    * @param folderPath location of the nodes to search
@@ -587,6 +633,7 @@ public class PopulateConnector implements ResourceContainer {
    * @param session session in which node will be retrieved
    * @param folderPath location of the nodes to search
    * @param docType type of document to get
+   * @param templateName the file name of template document
    * @return the Node
    * @throws Exception
    */
@@ -689,5 +736,4 @@ public class PopulateConnector implements ResourceContainer {
 
     return inputProperties;
   }
-
 }
