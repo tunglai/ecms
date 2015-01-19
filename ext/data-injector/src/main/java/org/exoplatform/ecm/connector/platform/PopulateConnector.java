@@ -91,8 +91,7 @@ public class PopulateConnector implements ResourceContainer {
 
   /** Files to be imported */
   private static final String[] SOURCE_FILES1 = {"content.doc application/msword", "content.pdf application/pdf",
-    "content.ppt application/ppt","content.xls application/xls"
-  };
+    "content.ppt application/ppt","content.xls application/xls"};
   private static final String[] SOURCE_FILES2 = {"image.jpg image/jpeg", "image.jpeg image/jpeg", "image.gif image/gif", 
   "image.png image/png"};
 
@@ -127,9 +126,9 @@ public class PopulateConnector implements ResourceContainer {
    * @param isPublishDoc indicates if the newly created documents are published.
    * @param isGenerateNewData indicates if data is generated new, not copy
    * @param size size of newly generated data
-   * @param template the option to generate documents by external template arrTemplate[0] = Doc Template;
-      arrTemplate[1] = Template Path
-   * @return
+   * @param template the option to generate documents by external template template[0] = Template Name,
+      				 template[1] = Template Path, arrTemplate[2] = true/false
+   * @return Response object
    */
   private Response initializeLoadData(boolean isPublishDoc, boolean isGenerateNewData, int size, String pMimetype, String... template) {
     SessionProvider sessionProvider = null;
@@ -142,6 +141,7 @@ public class PopulateConnector implements ResourceContainer {
                                                                 sessionProvider);
         session.save();
       }
+      
       //create importedFolderNode
       Node importedFolderNode = session.getRootNode().addNode(IMPORTED_DOCUMENTS_FOLDER);
       importedFolderNode.addMixin(NodetypeConstant.EXO_HIDDENABLE);
@@ -152,30 +152,28 @@ public class PopulateConnector implements ResourceContainer {
       /*BEGIN UPDATE*/     
       String cpTemplate = template[0];
       String cpTemplatePath = template[1];
-      boolean isExistedTemplate = false;      
-      String strNewTemplate = "";
-     
+      boolean isExistedTemplate = Boolean.parseBoolean(template[2]);
+      String strNewTemplate = "";     
       
-      if(!"".equals(cpTemplate)) {
-    	  // check template has in resources/contents folder
+      if(!"".equals(cpTemplate)) { // when template param is not empty
+    	  // check template has in `default template list`
     	  for (String importedFile : generatedFiles) {
               String importedFileName = importedFile.split(" ")[0];
-              if(importedFileName.equals(cpTemplate)){
+              if(importedFileName.equals(cpTemplate)) {
             	  isExistedTemplate = true;
             	  break;
               }          
           }
     	  
-    	  //when input template is not in default list, finds it in resources/contents folder    	  
-          if (!isExistedTemplate){        	  
-        	  int iTemplate = checkExternalTemplateExist(cpTemplate);
-        	  if(iTemplate == 1) isExistedTemplate = true;
-    		  strNewTemplate = cpTemplate + " " + processFileExtension(cpTemplate,pMimetype);    		 
-    		  if(isOffice(cpTemplate)) 
-    			  generatedFiles.add(strNewTemplate);
-    		  else 
-    			  initializedFiles.add(strNewTemplate);
-          }          
+    	  //when input template is not in default list, is There it existed in resources/contents folder
+          if (!isExistedTemplate) {        		
+        		  strNewTemplate = cpTemplate + " " + processFileExtension(cpTemplate,pMimetype);
+        		  
+        		  if(isOffice(cpTemplate))
+        			  generatedFiles.add(strNewTemplate);
+        		  else
+        			  initializedFiles.add(strNewTemplate);        	   
+          }
       }
       
       if (!isGenerateNewData) {
@@ -192,10 +190,10 @@ public class PopulateConnector implements ResourceContainer {
         String mimeType = importedFile.split(" ")[1];
         if (!session.itemExists(importedFolderNode.getPath() + "/" + importedFileName)) {
         	InputStream inputStream = null;
-        	if(!"".equals(cpTemplate)) {
+        	if(!"".equals(cpTemplate)) { // template param is not empty
             	//find out template file
             	if(importedFileName.equals(cpTemplate)) {            		
-        	    	if(!isExistedTemplate) { // input templete is in external    	    		
+        	    	if(!isExistedTemplate) { // input template is in external ($tomcat_home/..)
         	    		
         	    	     String sCheckTemplatePublic = getTemplatePath(cpTemplatePath) + File.separator + importedFileName;     
         	    		 File fTemplate2 = new File(sCheckTemplatePublic);
@@ -204,14 +202,14 @@ public class PopulateConnector implements ResourceContainer {
         	    		 InputStream input = new FileInputStream(fTemplate2);
         	    		 read(input, new BufferedOutputStream(new FileOutputStream(in)));	
         	    		  
-        	    		    //import the newly created file into jcr
+        	    		 //import the newly created file into jcr
         	    		 inputStream = new FileInputStream(in);
         	    		 
-        	    	} else { // input templete is in contents folder
+        	    	} else { // input template is in contents folder
         	    		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
         	    	}        	    	
             	}
-        	} else {
+        	} else { // default case: template param is empty
         		inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + importedFileName);
         	}
         	
@@ -225,8 +223,7 @@ public class PopulateConnector implements ResourceContainer {
 		         if(inputStream != null) {
 		         	try {
 		         		inputStream.close();
-		         	} catch (Exception ei) {    		
-		         	}
+		         	} catch (Exception ei) {}
 		         }
 	        }
         }
@@ -262,9 +259,9 @@ public class PopulateConnector implements ResourceContainer {
    * @param fileName
    * @param size
    * @param mimeType
-   * @param inTemplate
-   * @param inIsExistedTemplate
-   * @param inTemplatePath
+   * @param inTemplate template parameter value
+   * @param inIsExistedTemplate input template found in resouces/contents folder
+   * @param inTemplatePath the path of template document
    * @return String
    */
   private String generateFile(Node parentNode, String fileName, int size, String mimeType, String inTemplate, boolean inIsExistedTemplate, String inTemplatePath) throws Exception {
@@ -337,17 +334,18 @@ public class PopulateConnector implements ResourceContainer {
     
     //import the newly created file into jcr    
     InputStream inputStream = null;    
-    // template is not empty
-    if(!"".equals(inTemplate)) {
+    
+    if(!"".equals(inTemplate)) { // template is not empty so that read the provided template
     	//find out template file
     	if(fileName.equals(inTemplate)) {
-    		//input templete is in resources/contents folder
+    		//input template is in resources/contents folder
 	    	if(inIsExistedTemplate) {
 	    		 inputStream = this.getClass().getResourceAsStream(SOURCE_DATA_FOLDER_PATH + "/" + fileName);
 	    	
 	    	} else { // input template is in external	    		
 	    	     String sCheckTemplatePublic = getTemplatePath(inTemplatePath)+ File.separator + fileName;     
 	    		 File fTemplate2 = new File(sCheckTemplatePublic);
+	    		 
 	    		 // create temp file to store original data of nt:file node
 	    		 File in = File.createTempFile("content_tmp", null);
 	    		 InputStream input = new FileInputStream(fTemplate2);
@@ -434,6 +432,7 @@ public class PopulateConnector implements ResourceContainer {
       /*BEGIN UPDATE*/
       String sTemplatePath = null;
       String sTemplate = null;
+      boolean isInContentsFolder = false;
       if(template != null) {
     	  String tmpPlate = template.trim();
     	  if(tmpPlate.indexOf("/") > -1) {
@@ -441,19 +440,28 @@ public class PopulateConnector implements ResourceContainer {
 	    	  sTemplatePath = tmpPlate.substring(0, tmpPlate.lastIndexOf("/"));
 	    	  if(sTemplatePath == null || "".equals(sTemplatePath.trim())) sTemplatePath = new String("");
 	    	  if(sTemplate == null || "".equals(sTemplate.trim())) sTemplate = new String("");
-    	  } else
-    	  {
+    	  } else {
     		  sTemplatePath = new String("");
     		  sTemplate = tmpPlate;
     	  }
+    	  
+    	  int iTemplate = checkExternalTemplateExist(sTemplate,sTemplatePath);
+    	  if(iTemplate == 3) {
+    		  sTemplatePath = new String("");
+    		  sTemplate = new String("");
+    	  } else if (iTemplate == 1) {
+    		   isInContentsFolder = true;
+    	  }
+    	  
       } else {
     	  sTemplatePath = new String("");
     	  sTemplate = new String("");
       }      
      
-      String[] arrTemplate = new String[2];
+      String[] arrTemplate = new String[3];
       arrTemplate[0] = sTemplate;
       arrTemplate[1] = sTemplatePath;
+      arrTemplate[2] = String.valueOf(isInContentsFolder);
       
       initializeLoadData(true, true, (size == null ? 0 : size),mimetype, arrTemplate);           
       /*END UPDATE*/
@@ -567,16 +575,20 @@ public class PopulateConnector implements ResourceContainer {
 			 sPath = sPath + templatePath;
 		 }
 		 
+		 if(templatePath.endsWith("/")) {
+			 sPath = sPath.substring(0, sPath.length() - 1);
+		 }
+		 
 		 return sPath;
 	}
 
 	/**
-	 * @param fileName the file name to check, fileName has extenstion
-	 * @return 1=default template file 2=file in public template folder 3=file not existed
+	 * @param fileName the file name. fileName param has to have extenstion
+	 * @return 1=default template file, 2=file located in $TOMCAT/.. folder, 3=file not existed
 	 */
-	private int checkExternalTemplateExist(final String fileName) {
-		  int iRet = 2;		  
-	      String sCheckPublicTemplate = getTemplatePath("") + File.separator + fileName;	  
+	private int checkExternalTemplateExist(final String fileName, final String folderPath) {
+		  int iRet = 2;
+	      String sCheckPublicTemplate = getTemplatePath(folderPath) + File.separator + fileName;
 		  File fFile2Check = new File(sCheckPublicTemplate);
 		  InputStream inStream = null;
 		  
